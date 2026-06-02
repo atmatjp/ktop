@@ -17,17 +17,24 @@ func main() {
 
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
-		log.Fatalf("error", err)
+		log.Fatalf("kubeconfig読み込みエラー: %v", err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Fatalf("clientset作成エラー", err)
+		log.Fatalf("clientset作成エラー: %v", err)
 	}
+
+	/*
+	metricsClient, err := metricsv.NewForConfig(config)
+	if err != nil {
+		log.Fatalf("Metricsクライアント作成エラー: %v", err)
+	}
+	*/
 
 	pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
-		log.Fatalf("Pod取得エラー", err)
+		log.Fatalf("Pod取得エラー: %v", err)
 	}
 
 
