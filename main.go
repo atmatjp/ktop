@@ -3,42 +3,96 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
+
+	/*
+	"os/signal"
+	"time"
+	*/
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	metricsClient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 func main() {
-	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		panic(err)
+	}
+
+	kubeconfig := filepath.Join(home, ".kube", "config")
 
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
-		log.Fatalf("kubeconfig読み込みエラー: %v", err)
+		panic(err)
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
+	// metrics-server 用クライアント
+	metricsClientset, err := metricsClient.NewForConfig(config)
 	if err != nil {
-		log.Fatalf("clientset作成エラー: %v", err)
+		panic(err)
 	}
 
-	/*
-	metricsClient, err := metricsv.NewForConfig(config)
+	// Kubernetes API 用クライアント
+	coreClientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Fatalf("Metricsクライアント作成エラー: %v", err)
+		panic(err)
 	}
-	*/
 
-	pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
+
+	nodeMetricsList, err := metricsClientset.
+		MetricsV1beta1().
+		NodeMetricses().
+		List(context.Background(), metav1.ListOptions{})
 	if err != nil {
-		log.Fatalf("Pod取得エラー: %v", err)
+		panic(err)
 	}
 
+	fmt.Printf(
+		"%-5s %5s %5s\n",
+		"NODE",
+		"CPU(%)",
+		"RAM(%)",
+	)
 
-	for i, pod := range pods.Items {
-		fmt.Printf("[%d] Namespace: %-15s | Pod名: %s\n", i+1, pod.Namespace, pod.Name)
+	for _, nodeMetric := range nodeMetricsList.Items {
+		node, err := coreClientset.
+			CoreV1().
+			Nodes().
+			Get(context.Background(), nodeMetric.Name, metav1.GetOptions{})
+		if err != nil {
+			fmt.Printf("failed to get node %s: %v\n", nodeMetric.Name, err)
+			continue
+		}
+
+		// CPU
+		usedCPU := nodeMetric.Usage.Cpu().MilliValue()
+		totalCPU := node.Status.Capacity.Cpu().MilliValue()
+
+		cpuPercent := 0.0
+		if totalCPU > 0 {
+			cpuPercent = float64(usedCPU) / float64(totalCPU) * 100
+		}
+
+		// Memory
+		usedMem := nodeMetric.Usage.Memory().Value()
+		totalMem := node.Status.Capacity.Memory().Value()
+
+		memPercent := 0.0
+		if totalMem > 0 {
+			memPercent = float64(usedMem) / float64(totalMem) * 100
+		}
+
+
+		fmt.Printf(
+			"%-5s %5.1f%% %5.1f%%\n",
+			nodeMetric.Name,
+			cpuPercent,
+			memPercent,
+		)
+
 	}
 }
